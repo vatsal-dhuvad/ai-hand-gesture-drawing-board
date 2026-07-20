@@ -39,6 +39,7 @@ Upload these files to GitHub:
 - `app.py`
 - `gesture_air_canvas.py`
 - `requirements.txt`
+- `packages.txt`
 - `runtime.txt`
 - `.gitignore`
 - `LICENSE`
