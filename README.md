@@ -19,7 +19,7 @@ Draw in the air using your hand and browser camera. This deploy-friendly version
 - 1 finger: draw, erase, or preview selected shape
 - 2 fingers: move without drawing and finish shape
 - 3 fingers: change color
-- 4 fingers: clear canvas
+- 4 fingers: safe pause gesture, no canvas clear
 - 5 fingers: temporary erase without changing the selected tool
 
 ## Run Locally

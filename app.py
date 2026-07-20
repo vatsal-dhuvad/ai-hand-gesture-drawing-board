@@ -280,7 +280,7 @@ components.html(
               <div class="card"><strong>1 finger</strong><span>Draw, erase, or preview selected shape.</span></div>
               <div class="card"><strong>2 fingers</strong><span>Move without drawing and finish shape.</span></div>
               <div class="card"><strong>3 fingers</strong><span>Change to next color.</span></div>
-              <div class="card"><strong>4 fingers</strong><span>Clear the full canvas.</span></div>
+              <div class="card"><strong>4 fingers</strong><span>Safe pause gesture. It will not clear your drawing.</span></div>
               <div class="card"><strong>5 fingers</strong><span>Erase with open hand.</span></div>
               <div class="card"><strong>Controls</strong><span>Pick tool, color, brush size, eraser size, undo, and download.</span></div>
             </div>
@@ -327,7 +327,6 @@ components.html(
         let camera = null;
         let history = [];
         let colorCooldown = 0;
-        let clearCooldown = 0;
 
         function setStatus(text) {
           statusEl.textContent = text;
@@ -497,8 +496,6 @@ components.html(
             const tool = toolInput.value;
 
             if (colorCooldown > 0) colorCooldown--;
-            if (clearCooldown > 0) clearCooldown--;
-
             if (fingers === 1) {
               if (["Line", "Rectangle", "Circle"].includes(tool)) {
                 if (!shapeStart) {
@@ -522,9 +519,10 @@ components.html(
               buildSwatches();
               colorCooldown = 18;
               previousPoint = null;
-            } else if (fingers === 4 && clearCooldown === 0) {
-              clearCanvas(true);
-              clearCooldown = 24;
+            } else if (fingers === 4) {
+              previousPoint = null;
+              shapeStart = null;
+              shapeLast = null;
             } else if (fingers === 5 && gestureEraseInput.checked) {
               shapeStart = null;
               shapeLast = null;
