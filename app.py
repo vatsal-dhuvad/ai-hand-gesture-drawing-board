@@ -3,9 +3,10 @@ from datetime import datetime
 from pathlib import Path
 
 import cv2
-import mediapipe as mp
 import numpy as np
 import streamlit as st
+from mediapipe.python.solutions import drawing_utils as mp_draw
+from mediapipe.python.solutions import hands as mp_hands
 from streamlit_webrtc import RTCConfiguration, VideoProcessorBase, WebRtcMode, webrtc_streamer
 
 try:
@@ -232,13 +233,13 @@ class GestureDrawingProcessor(VideoProcessorBase):
         self.clear_requested = False
         self.save_requested = False
         self.last_frame = None
-        self.hands = mp.solutions.hands.Hands(
+        self.hands = mp_hands.Hands(
             max_num_hands=1,
             min_detection_confidence=0.72,
             min_tracking_confidence=0.72,
         )
-        self.drawer = mp.solutions.drawing_utils
-        self.hand_connections = mp.solutions.hands.HAND_CONNECTIONS
+        self.drawer = mp_draw
+        self.hand_connections = mp_hands.HAND_CONNECTIONS
 
     def update_settings(self, settings):
         with self.lock:

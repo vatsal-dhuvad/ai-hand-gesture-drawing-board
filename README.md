@@ -47,9 +47,11 @@ Upload these files to GitHub:
 Deploy on Streamlit Community Cloud with:
 
 - Main file path: `app.py`
-- Python version: controlled by `runtime.txt`
+- Python version: choose `3.11` from Advanced settings
 
 Camera access works on localhost or HTTPS deployed links.
+
+If your existing Streamlit app already deployed with Python 3.14, delete that app from Streamlit Cloud and deploy it again. Streamlit does not reliably change the Python version for an existing deployed app from a repo file.
 
 ## Local OpenCV Window Version
 

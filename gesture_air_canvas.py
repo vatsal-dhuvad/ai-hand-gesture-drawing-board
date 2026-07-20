@@ -3,8 +3,9 @@ from datetime import datetime
 from pathlib import Path
 
 import cv2
-import mediapipe as mp
 import numpy as np
+from mediapipe.python.solutions import drawing_utils as mp_draw
+from mediapipe.python.solutions import hands as mp_hands
 
 
 PROJECT_DIR = Path(__file__).resolve().parent
@@ -163,9 +164,6 @@ def main():
 
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
-
-    mp_hands = mp.solutions.hands
-    mp_draw = mp.solutions.drawing_utils
 
     canvas = None
     history = []
