@@ -106,6 +106,11 @@ components.html(
         select, input[type="range"], button {
           width: 100%;
         }
+        input[type="checkbox"] {
+          width: auto;
+          accent-color: #ef4444;
+          margin-right: 8px;
+        }
         select {
           height: 40px;
           border-radius: 8px;
@@ -233,6 +238,13 @@ components.html(
           </div>
 
           <div class="field">
+            <label>
+              <input id="gestureErase" type="checkbox" checked>
+              5-finger temporary erase
+            </label>
+          </div>
+
+          <div class="field">
             <label>Color</label>
             <div class="swatches" id="swatches"></div>
           </div>
@@ -289,6 +301,7 @@ components.html(
         const undoBtn = document.getElementById("undoBtn");
         const saveBtn = document.getElementById("saveBtn");
         const toolInput = document.getElementById("tool");
+        const gestureEraseInput = document.getElementById("gestureErase");
         const brushInput = document.getElementById("brush");
         const eraserInput = document.getElementById("eraser");
         const brushValue = document.getElementById("brushValue");
@@ -454,7 +467,8 @@ components.html(
           ctx.font = "bold 24px Arial";
           ctx.fillText("AI Hand Gesture Drawing Board", 18, 32);
           ctx.font = "15px Arial";
-          ctx.fillText(`Tool: ${toolInput.value} | Color: ${colors[currentColorIndex].name} | Brush: ${brushInput.value} | Eraser: ${eraserInput.value} | Fingers: ${fingers}`, 18, 60);
+          const visibleTool = fingers === 5 && gestureEraseInput.checked ? "Temporary Eraser" : toolInput.value;
+          ctx.fillText(`Tool: ${visibleTool} | Color: ${colors[currentColorIndex].name} | Brush: ${brushInput.value} | Eraser: ${eraserInput.value} | Fingers: ${fingers}`, 18, 60);
 
           if (results.multiHandLandmarks && results.multiHandLandmarks.length) {
             const landmarks = results.multiHandLandmarks[0].map(p => ({ x: 1 - p.x, y: p.y, z: p.z }));
@@ -511,8 +525,9 @@ components.html(
             } else if (fingers === 4 && clearCooldown === 0) {
               clearCanvas(true);
               clearCooldown = 24;
-            } else if (fingers === 5) {
-              toolInput.value = "Eraser";
+            } else if (fingers === 5 && gestureEraseInput.checked) {
+              shapeStart = null;
+              shapeLast = null;
               drawFreehand(point, "Eraser");
             } else {
               previousPoint = null;
