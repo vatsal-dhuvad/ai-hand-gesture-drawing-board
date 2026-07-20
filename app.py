@@ -55,11 +55,6 @@ st.markdown(
     '<div class="subtitle">Draw in the air with your hand using live browser camera, MediaPipe Hands, and canvas drawing tools.</div>',
     unsafe_allow_html=True,
 )
-st.markdown(
-    '<div class="note">This deploy version has no heavy Python camera packages. Click Start Camera, allow camera permission, and draw directly in the browser.</div>',
-    unsafe_allow_html=True,
-)
-
 components.html(
     """
     <!doctype html>
