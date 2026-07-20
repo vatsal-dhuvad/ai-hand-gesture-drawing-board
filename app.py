@@ -1,42 +1,12 @@
-import threading
-from datetime import datetime
-from pathlib import Path
-
-import cv2
-import numpy as np
 import streamlit as st
-from mediapipe.python.solutions import drawing_utils as mp_draw
-from mediapipe.python.solutions import hands as mp_hands
-from streamlit_webrtc import RTCConfiguration, VideoProcessorBase, WebRtcMode, webrtc_streamer
-
-try:
-    import av
-except ModuleNotFoundError:
-    av = None
-
-
-PROJECT_DIR = Path(__file__).resolve().parent
-SAVE_DIR = PROJECT_DIR / "saved_drawings"
-SAVE_DIR.mkdir(exist_ok=True)
-
-COLORS = {
-    "Blue": (255, 80, 20),
-    "Green": (60, 190, 70),
-    "Red": (40, 40, 230),
-    "Yellow": (40, 220, 240),
-    "Purple": (220, 90, 210),
-    "White": (255, 255, 255),
-}
-
-SHAPE_TOOLS = {"Line", "Rectangle", "Circle"}
+import streamlit.components.v1 as components
 
 
 st.set_page_config(
     page_title="AI Hand Gesture Drawing Board",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
-
 
 st.markdown(
     """
@@ -44,402 +14,576 @@ st.markdown(
         html, body, .stApp, [data-testid="stAppViewContainer"] {
             color-scheme: light !important;
         }
-        :root {
-            --app-bg: #f3f6fb;
-            --panel-bg: #ffffff;
-            --ink: #111827;
-            --muted: #4b5563;
-            --border: #d8e0ec;
-            --blue: #2563eb;
-        }
         .stApp,
         [data-testid="stAppViewContainer"],
         [data-testid="stMain"],
         [data-testid="stHeader"] {
-            background: var(--app-bg) !important;
-            color: var(--ink) !important;
+            background: #f3f6fb !important;
+            color: #111827 !important;
         }
-        [data-testid="stSidebar"] {
-            background: #ffffff !important;
-            border-right: 1px solid var(--border);
-        }
-        h1, h2, h3, h4, p, label, span,
-        [data-testid="stSidebar"] h1,
-        [data-testid="stSidebar"] h2,
-        [data-testid="stSidebar"] h3,
-        [data-testid="stSidebar"] p,
-        [data-testid="stSidebar"] label,
-        [data-testid="stSidebar"] span {
-            color: var(--ink) !important;
+        h1, h2, h3, p, span, label {
+            color: #111827 !important;
             opacity: 1 !important;
         }
-        .hero-title {
-            color: var(--ink);
+        .title {
             font-size: 2.35rem;
             font-weight: 850;
             letter-spacing: 0;
-            margin-bottom: 0.25rem;
+            margin-bottom: 0.2rem;
         }
-        .hero-subtitle {
-            color: var(--muted);
+        .subtitle {
+            color: #4b5563 !important;
             font-size: 1rem;
-            margin-bottom: 1.2rem;
+            margin-bottom: 1rem;
         }
-        .info-box {
+        .note {
             background: #e8f5ee;
             border: 1px solid #b8e2c8;
             border-radius: 8px;
-            color: #14532d;
+            color: #14532d !important;
             padding: 0.9rem 1rem;
             font-weight: 700;
             margin-bottom: 1rem;
-        }
-        .control-grid {
-            display: grid;
-            grid-template-columns: repeat(3, minmax(0, 1fr));
-            gap: 0.75rem;
-            margin: 0.5rem 0 1rem;
-        }
-        .control-card {
-            background: #ffffff;
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 0.8rem;
-            min-height: 92px;
-            box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
-        }
-        .control-card strong {
-            display: block;
-            margin-bottom: 0.25rem;
-            color: var(--ink);
-        }
-        .control-card span {
-            color: var(--muted) !important;
-            font-size: 0.92rem;
-        }
-        div[data-testid="stMetric"] {
-            background: var(--panel-bg);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 1rem;
-            box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
-        }
-        div[data-testid="stMetric"] * {
-            color: var(--ink) !important;
-            opacity: 1 !important;
-        }
-        div[data-testid="stSlider"] *,
-        div[data-testid="stSelectbox"] *,
-        div[data-testid="stCheckbox"] *,
-        div[data-testid="stButton"] * {
-            color: var(--ink) !important;
-            -webkit-text-fill-color: var(--ink) !important;
-            opacity: 1 !important;
-        }
-        div[data-testid="stButton"] button {
-            border-radius: 8px !important;
-            font-weight: 800 !important;
-            border: 1px solid #bfdbfe !important;
-        }
-        @media (max-width: 900px) {
-            .control-grid {
-                grid-template-columns: 1fr;
-            }
         }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
-
-def count_fingers(hand_landmarks, handedness):
-    tips = [4, 8, 12, 16, 20]
-    pips = [3, 6, 10, 14, 18]
-    landmarks = hand_landmarks.landmark
-    fingers = []
-
-    if handedness == "Right":
-        fingers.append(landmarks[tips[0]].x < landmarks[pips[0]].x)
-    else:
-        fingers.append(landmarks[tips[0]].x > landmarks[pips[0]].x)
-
-    for tip, pip in zip(tips[1:], pips[1:]):
-        fingers.append(landmarks[tip].y < landmarks[pip].y)
-
-    return sum(fingers)
-
-
-def point_from_landmark(hand_landmarks, landmark_id, width, height):
-    landmark = hand_landmarks.landmark[landmark_id]
-    return int(landmark.x * width), int(landmark.y * height)
-
-
-def draw_shape(canvas, tool, start, end, color, thickness):
-    if not start or not end:
-        return
-    if tool == "Line":
-        cv2.line(canvas, start, end, color, thickness)
-    elif tool == "Rectangle":
-        cv2.rectangle(canvas, start, end, color, thickness)
-    elif tool == "Circle":
-        radius = int(((end[0] - start[0]) ** 2 + (end[1] - start[1]) ** 2) ** 0.5)
-        cv2.circle(canvas, start, radius, color, thickness)
-
-
-def draw_panel(frame, tool, color_name, brush_size, eraser_size, fingers_count):
-    height, width = frame.shape[:2]
-    overlay = frame.copy()
-    cv2.rectangle(overlay, (0, 0), (width, 96), (18, 24, 38), -1)
-    frame[:] = cv2.addWeighted(overlay, 0.86, frame, 0.14, 0)
-
-    cv2.putText(frame, "AI Hand Gesture Drawing Board", (18, 34), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
-    cv2.putText(
-        frame,
-        f"Tool: {tool} | Color: {color_name} | Brush: {brush_size} | Eraser: {eraser_size} | Fingers: {fingers_count}",
-        (18, 68),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.55,
-        (230, 236, 245),
-        1,
-    )
-
-    x = max(18, width - 315)
-    for name, color in COLORS.items():
-        cv2.circle(frame, (x, height - 28), 11, color, -1)
-        if name == color_name:
-            cv2.circle(frame, (x, height - 28), 15, (255, 255, 255), 2)
-        x += 45
-
-
-def image_gallery():
-    return sorted(SAVE_DIR.glob("*.png"), key=lambda path: path.stat().st_mtime, reverse=True)
-
-
-class GestureDrawingProcessor(VideoProcessorBase):
-    def __init__(self):
-        self.lock = threading.Lock()
-        self.settings = {
-            "tool": "Pencil",
-            "color_name": "Blue",
-            "brush_size": 8,
-            "eraser_size": 55,
-            "mirror": True,
-        }
-        self.canvas = None
-        self.previous_point = None
-        self.shape_start = None
-        self.shape_last = None
-        self.color_cooldown = 0
-        self.clear_requested = False
-        self.save_requested = False
-        self.last_frame = None
-        self.hands = mp_hands.Hands(
-            max_num_hands=1,
-            min_detection_confidence=0.72,
-            min_tracking_confidence=0.72,
-        )
-        self.drawer = mp_draw
-        self.hand_connections = mp_hands.HAND_CONNECTIONS
-
-    def update_settings(self, settings):
-        with self.lock:
-            self.settings.update(settings)
-
-    def request_clear(self):
-        with self.lock:
-            self.clear_requested = True
-
-    def request_save(self):
-        with self.lock:
-            self.save_requested = True
-
-    def recv(self, frame):
-        image = frame.to_ndarray(format="bgr24")
-
-        with self.lock:
-            settings = self.settings.copy()
-            clear_requested = self.clear_requested
-            save_requested = self.save_requested
-            self.clear_requested = False
-            self.save_requested = False
-
-        if settings["mirror"]:
-            image = cv2.flip(image, 1)
-
-        height, width = image.shape[:2]
-        if self.canvas is None or self.canvas.shape[:2] != image.shape[:2]:
-            self.canvas = np.zeros_like(image)
-
-        if clear_requested:
-            self.canvas[:] = 0
-            self.previous_point = None
-            self.shape_start = None
-            self.shape_last = None
-
-        display = image.copy()
-        rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        result = self.hands.process(rgb)
-
-        tool = settings["tool"]
-        color_name = settings["color_name"]
-        color = COLORS[color_name]
-        brush_size = int(settings["brush_size"])
-        eraser_size = int(settings["eraser_size"])
-        fingers_count = 0
-
-        if result.multi_hand_landmarks and result.multi_handedness:
-            hand_landmarks = result.multi_hand_landmarks[0]
-            handedness = result.multi_handedness[0].classification[0].label
-            fingers_count = count_fingers(hand_landmarks, handedness)
-            point = point_from_landmark(hand_landmarks, 8, width, height)
-
-            self.drawer.draw_landmarks(display, hand_landmarks, self.hand_connections)
-            cv2.circle(display, point, 10, color if tool != "Eraser" else (255, 255, 255), -1)
-
-            if self.color_cooldown > 0:
-                self.color_cooldown -= 1
-
-            if fingers_count == 1:
-                if tool in SHAPE_TOOLS:
-                    if self.shape_start is None:
-                        self.shape_start = point
-                    self.shape_last = point
-                    preview = display.copy()
-                    draw_shape(preview, tool, self.shape_start, self.shape_last, color, brush_size)
-                    display = cv2.addWeighted(preview, 0.75, display, 0.25, 0)
-                else:
-                    draw_color = (0, 0, 0) if tool == "Eraser" else color
-                    draw_size = eraser_size if tool == "Eraser" else brush_size
-                    if self.previous_point is None:
-                        self.previous_point = point
-                    cv2.line(self.canvas, self.previous_point, point, draw_color, draw_size)
-                    self.previous_point = point
-
-            elif fingers_count == 2:
-                self.previous_point = None
-                if tool in SHAPE_TOOLS and self.shape_start and self.shape_last:
-                    draw_shape(self.canvas, tool, self.shape_start, self.shape_last, color, brush_size)
-                self.shape_start = None
-                self.shape_last = None
-
-            elif fingers_count == 3 and self.color_cooldown == 0:
-                names = list(COLORS.keys())
-                next_index = (names.index(color_name) + 1) % len(names)
-                with self.lock:
-                    self.settings["color_name"] = names[next_index]
-                self.color_cooldown = 18
-                self.previous_point = None
-
-            elif fingers_count == 4:
-                self.canvas[:] = 0
-                self.previous_point = None
-                self.shape_start = None
-                self.shape_last = None
-
-            elif fingers_count == 5:
-                cv2.circle(self.canvas, point, eraser_size, (0, 0, 0), -1)
-                self.previous_point = None
-        else:
-            self.previous_point = None
-            if tool in SHAPE_TOOLS and self.shape_start and self.shape_last:
-                draw_shape(self.canvas, tool, self.shape_start, self.shape_last, color, brush_size)
-            self.shape_start = None
-            self.shape_last = None
-
-        mask = cv2.cvtColor(self.canvas, cv2.COLOR_BGR2GRAY)
-        _, mask_inv = cv2.threshold(mask, 20, 255, cv2.THRESH_BINARY_INV)
-        frame_bg = cv2.bitwise_and(display, display, mask=mask_inv)
-        drawing_fg = cv2.bitwise_and(self.canvas, self.canvas, mask=mask)
-        final = cv2.add(frame_bg, drawing_fg)
-
-        draw_panel(final, tool, color_name, brush_size, eraser_size, fingers_count)
-
-        if save_requested:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            cv2.imwrite(str(SAVE_DIR / f"gesture_drawing_{timestamp}.png"), final)
-
-        self.last_frame = final.copy()
-        return av.VideoFrame.from_ndarray(final, format="bgr24")
-
-
-if av is None:
-    st.error("The `av` package is missing. Add `av` to requirements.txt and reboot the app.")
-    st.stop()
-
-with st.sidebar:
-    st.header("Drawing Settings")
-    tool = st.selectbox("Tool", ["Pencil", "Line", "Rectangle", "Circle", "Eraser"])
-    color_name = st.selectbox("Color", list(COLORS.keys()))
-    brush_size = st.slider("Pencil / shape size", 2, 40, 8)
-    eraser_size = st.slider("Eraser size", 20, 140, 55)
-    mirror = st.checkbox("Mirror camera", value=True)
-
-st.markdown('<div class="hero-title">AI Hand Gesture Drawing Board</div>', unsafe_allow_html=True)
+st.markdown('<div class="title">AI Hand Gesture Drawing Board</div>', unsafe_allow_html=True)
 st.markdown(
-    '<div class="hero-subtitle">Draw in the air with your hand using live browser camera, OpenCV, and MediaPipe.</div>',
+    '<div class="subtitle">Draw in the air with your hand using live browser camera, MediaPipe Hands, and canvas drawing tools.</div>',
     unsafe_allow_html=True,
 )
 st.markdown(
-    '<div class="info-box">Click Start below, allow camera permission, then use your hand in front of the camera. This version works inside Streamlit because it uses browser WebRTC camera.</div>',
+    '<div class="note">This deploy version has no heavy Python camera packages. Click Start Camera, allow camera permission, and draw directly in the browser.</div>',
     unsafe_allow_html=True,
 )
 
-metric_a, metric_b, metric_c, metric_d = st.columns(4)
-metric_a.metric("Gesture Engine", "MediaPipe")
-metric_b.metric("Drawing Tools", "5")
-metric_c.metric("Colors", "6")
-metric_d.metric("Camera", "WebRTC")
-
-rtc_configuration = RTCConfiguration({"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]})
-
-ctx = webrtc_streamer(
-    key="hand-gesture-drawing-board",
-    mode=WebRtcMode.SENDRECV,
-    rtc_configuration=rtc_configuration,
-    video_processor_factory=GestureDrawingProcessor,
-    media_stream_constraints={"video": True, "audio": False},
-    async_processing=True,
-)
-
-if ctx.video_processor:
-    ctx.video_processor.update_settings(
-        {
-            "tool": tool,
-            "color_name": color_name,
-            "brush_size": brush_size,
-            "eraser_size": eraser_size,
-            "mirror": mirror,
-        }
-    )
-
-action_a, action_b = st.columns(2)
-if action_a.button("Clear Canvas", use_container_width=True) and ctx.video_processor:
-    ctx.video_processor.request_clear()
-if action_b.button("Save Current Frame", use_container_width=True) and ctx.video_processor:
-    ctx.video_processor.request_save()
-    st.success("Save requested. It will appear in the gallery after the next camera frame.")
-
-st.subheader("Gesture Controls")
-st.markdown(
+components.html(
     """
-    <div class="control-grid">
-        <div class="control-card"><strong>1 finger</strong><span>Draw with pencil, erase, or preview a selected shape.</span></div>
-        <div class="control-card"><strong>2 fingers</strong><span>Move without drawing and finish line, rectangle, or circle.</span></div>
-        <div class="control-card"><strong>3 fingers</strong><span>Cycle to the next color.</span></div>
-        <div class="control-card"><strong>4 fingers</strong><span>Clear the full canvas.</span></div>
-        <div class="control-card"><strong>5 fingers</strong><span>Erase using your open hand.</span></div>
-        <div class="control-card"><strong>Sidebar</strong><span>Pick tool, color, pencil size, eraser size, and mirror mode.</span></div>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
+    <!doctype html>
+    <html>
+    <head>
+      <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+      <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+      <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+      <style>
+        * { box-sizing: border-box; }
+        body {
+          margin: 0;
+          font-family: Inter, Segoe UI, Arial, sans-serif;
+          background: #f3f6fb;
+          color: #111827;
+        }
+        .app {
+          display: grid;
+          grid-template-columns: 300px 1fr;
+          gap: 16px;
+          min-height: 820px;
+        }
+        .panel, .stage-wrap, .help {
+          background: #ffffff;
+          border: 1px solid #d8e0ec;
+          border-radius: 8px;
+          box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+        }
+        .panel {
+          padding: 16px;
+          height: fit-content;
+        }
+        .panel h2, .help h2 {
+          margin: 0 0 12px;
+          font-size: 20px;
+        }
+        .field { margin-bottom: 14px; }
+        label {
+          display: block;
+          font-size: 14px;
+          font-weight: 750;
+          margin-bottom: 6px;
+        }
+        select, input[type="range"], button {
+          width: 100%;
+        }
+        select {
+          height: 40px;
+          border-radius: 8px;
+          border: 1px solid #cbd5e1;
+          padding: 0 10px;
+          background: #fff;
+          color: #111827;
+          font-weight: 650;
+        }
+        input[type="range"] {
+          accent-color: #ef4444;
+        }
+        button {
+          height: 42px;
+          border-radius: 8px;
+          border: 1px solid #bfdbfe;
+          background: #eff6ff;
+          color: #1d4ed8;
+          font-weight: 850;
+          cursor: pointer;
+          margin-bottom: 8px;
+        }
+        button.primary {
+          background: #1d4ed8;
+          color: #ffffff;
+          border-color: #1d4ed8;
+        }
+        button.danger {
+          background: #fef2f2;
+          color: #b91c1c;
+          border-color: #fecaca;
+        }
+        .status {
+          margin-top: 10px;
+          padding: 10px;
+          border-radius: 8px;
+          background: #f8fafc;
+          border: 1px solid #e2e8f0;
+          font-size: 14px;
+          line-height: 1.45;
+        }
+        .stage-wrap {
+          padding: 14px;
+        }
+        .stage {
+          position: relative;
+          width: 100%;
+          aspect-ratio: 16 / 9;
+          background: #111827;
+          border-radius: 8px;
+          overflow: hidden;
+        }
+        video, canvas {
+          position: absolute;
+          inset: 0;
+          width: 100%;
+          height: 100%;
+        }
+        video { display: none; }
+        .help {
+          margin-top: 16px;
+          padding: 16px;
+        }
+        .cards {
+          display: grid;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+          gap: 10px;
+        }
+        .card {
+          border: 1px solid #d8e0ec;
+          border-radius: 8px;
+          padding: 12px;
+          min-height: 86px;
+          background: #ffffff;
+        }
+        .card strong {
+          display: block;
+          margin-bottom: 4px;
+        }
+        .card span {
+          color: #4b5563;
+          font-size: 14px;
+        }
+        .swatches {
+          display: grid;
+          grid-template-columns: repeat(6, 1fr);
+          gap: 6px;
+        }
+        .swatch {
+          height: 28px;
+          border-radius: 8px;
+          border: 2px solid #e5e7eb;
+          cursor: pointer;
+        }
+        .swatch.active {
+          border-color: #111827;
+          outline: 2px solid #bfdbfe;
+        }
+        @media (max-width: 900px) {
+          .app { grid-template-columns: 1fr; }
+          .cards { grid-template-columns: 1fr; }
+        }
+      </style>
+    </head>
+    <body>
+      <div class="app">
+        <aside class="panel">
+          <h2>Controls</h2>
 
-st.subheader("Saved Drawing Gallery")
-images = image_gallery()
-if not images:
-    st.caption("No saved drawings yet. Click Save Current Frame after starting the camera.")
-else:
-    cols = st.columns(3)
-    for index, image_path in enumerate(images[:9]):
-        with cols[index % 3]:
-            st.image(image_path, caption=image_path.name, use_container_width=True)
+          <button id="startBtn" class="primary">Start Camera</button>
+          <button id="stopBtn">Stop Camera</button>
+          <button id="clearBtn" class="danger">Clear Canvas</button>
+          <button id="undoBtn">Undo</button>
+          <button id="saveBtn">Download Drawing</button>
+
+          <div class="field">
+            <label for="tool">Tool</label>
+            <select id="tool">
+              <option>Pencil</option>
+              <option>Line</option>
+              <option>Rectangle</option>
+              <option>Circle</option>
+              <option>Eraser</option>
+            </select>
+          </div>
+
+          <div class="field">
+            <label>Color</label>
+            <div class="swatches" id="swatches"></div>
+          </div>
+
+          <div class="field">
+            <label for="brush">Pencil / shape size: <span id="brushValue">8</span></label>
+            <input id="brush" type="range" min="2" max="40" value="8">
+          </div>
+
+          <div class="field">
+            <label for="eraser">Eraser size: <span id="eraserValue">55</span></label>
+            <input id="eraser" type="range" min="20" max="140" value="55">
+          </div>
+
+          <div class="status">
+            <strong>Status</strong><br>
+            <span id="status">Camera stopped.</span><br>
+            <span id="fingerStatus">Fingers: 0</span>
+          </div>
+        </aside>
+
+        <main>
+          <section class="stage-wrap">
+            <div class="stage">
+              <video id="video" playsinline></video>
+              <canvas id="output"></canvas>
+            </div>
+          </section>
+
+          <section class="help">
+            <h2>Gesture Controls</h2>
+            <div class="cards">
+              <div class="card"><strong>1 finger</strong><span>Draw, erase, or preview selected shape.</span></div>
+              <div class="card"><strong>2 fingers</strong><span>Move without drawing and finish shape.</span></div>
+              <div class="card"><strong>3 fingers</strong><span>Change to next color.</span></div>
+              <div class="card"><strong>4 fingers</strong><span>Clear the full canvas.</span></div>
+              <div class="card"><strong>5 fingers</strong><span>Erase with open hand.</span></div>
+              <div class="card"><strong>Controls</strong><span>Pick tool, color, brush size, eraser size, undo, and download.</span></div>
+            </div>
+          </section>
+        </main>
+      </div>
+
+      <script>
+        const video = document.getElementById("video");
+        const output = document.getElementById("output");
+        const ctx = output.getContext("2d");
+        const drawing = document.createElement("canvas");
+        const dctx = drawing.getContext("2d");
+
+        const startBtn = document.getElementById("startBtn");
+        const stopBtn = document.getElementById("stopBtn");
+        const clearBtn = document.getElementById("clearBtn");
+        const undoBtn = document.getElementById("undoBtn");
+        const saveBtn = document.getElementById("saveBtn");
+        const toolInput = document.getElementById("tool");
+        const brushInput = document.getElementById("brush");
+        const eraserInput = document.getElementById("eraser");
+        const brushValue = document.getElementById("brushValue");
+        const eraserValue = document.getElementById("eraserValue");
+        const statusEl = document.getElementById("status");
+        const fingerStatus = document.getElementById("fingerStatus");
+        const swatches = document.getElementById("swatches");
+
+        const colors = [
+          { name: "Blue", value: "#1450ff" },
+          { name: "Green", value: "#22c55e" },
+          { name: "Red", value: "#ef4444" },
+          { name: "Yellow", value: "#eab308" },
+          { name: "Purple", value: "#a855f7" },
+          { name: "White", value: "#ffffff" }
+        ];
+
+        let currentColorIndex = 0;
+        let currentColor = colors[currentColorIndex].value;
+        let previousPoint = null;
+        let shapeStart = null;
+        let shapeLast = null;
+        let camera = null;
+        let history = [];
+        let colorCooldown = 0;
+        let clearCooldown = 0;
+
+        function setStatus(text) {
+          statusEl.textContent = text;
+        }
+
+        function buildSwatches() {
+          swatches.innerHTML = "";
+          colors.forEach((color, index) => {
+            const button = document.createElement("button");
+            button.className = "swatch" + (index === currentColorIndex ? " active" : "");
+            button.style.background = color.value;
+            button.title = color.name;
+            button.onclick = () => {
+              currentColorIndex = index;
+              currentColor = colors[index].value;
+              buildSwatches();
+            };
+            swatches.appendChild(button);
+          });
+        }
+
+        function resizeCanvases(width, height) {
+          if (output.width === width && output.height === height) return;
+          output.width = width;
+          output.height = height;
+
+          const oldDrawing = document.createElement("canvas");
+          oldDrawing.width = drawing.width || width;
+          oldDrawing.height = drawing.height || height;
+          oldDrawing.getContext("2d").drawImage(drawing, 0, 0);
+
+          drawing.width = width;
+          drawing.height = height;
+          dctx.drawImage(oldDrawing, 0, 0, width, height);
+        }
+
+        function pushHistory() {
+          const snapshot = document.createElement("canvas");
+          snapshot.width = drawing.width;
+          snapshot.height = drawing.height;
+          snapshot.getContext("2d").drawImage(drawing, 0, 0);
+          history.push(snapshot);
+          if (history.length > 20) history.shift();
+        }
+
+        function undo() {
+          const snapshot = history.pop();
+          if (!snapshot) return;
+          dctx.clearRect(0, 0, drawing.width, drawing.height);
+          dctx.drawImage(snapshot, 0, 0);
+        }
+
+        function isFingerOpen(landmarks, tip, pip) {
+          return landmarks[tip].y < landmarks[pip].y;
+        }
+
+        function countFingers(landmarks, handedness) {
+          let count = 0;
+          const thumbOpen = handedness === "Right"
+            ? landmarks[4].x < landmarks[3].x
+            : landmarks[4].x > landmarks[3].x;
+          if (thumbOpen) count++;
+          if (isFingerOpen(landmarks, 8, 6)) count++;
+          if (isFingerOpen(landmarks, 12, 10)) count++;
+          if (isFingerOpen(landmarks, 16, 14)) count++;
+          if (isFingerOpen(landmarks, 20, 18)) count++;
+          return count;
+        }
+
+        function pointFromLandmark(landmark) {
+          return {
+            x: output.width - landmark.x * output.width,
+            y: landmark.y * output.height
+          };
+        }
+
+        function drawShape(targetCtx, tool, start, end, preview = false) {
+          if (!start || !end) return;
+          targetCtx.save();
+          targetCtx.strokeStyle = currentColor;
+          targetCtx.lineWidth = Number(brushInput.value);
+          targetCtx.lineCap = "round";
+          targetCtx.lineJoin = "round";
+          if (preview) targetCtx.globalAlpha = 0.8;
+
+          targetCtx.beginPath();
+          if (tool === "Line") {
+            targetCtx.moveTo(start.x, start.y);
+            targetCtx.lineTo(end.x, end.y);
+          } else if (tool === "Rectangle") {
+            targetCtx.rect(start.x, start.y, end.x - start.x, end.y - start.y);
+          } else if (tool === "Circle") {
+            const radius = Math.hypot(end.x - start.x, end.y - start.y);
+            targetCtx.arc(start.x, start.y, radius, 0, Math.PI * 2);
+          }
+          targetCtx.stroke();
+          targetCtx.restore();
+        }
+
+        function drawFreehand(point, tool) {
+          if (!previousPoint) {
+            pushHistory();
+            previousPoint = point;
+          }
+
+          dctx.save();
+          dctx.lineCap = "round";
+          dctx.lineJoin = "round";
+          if (tool === "Eraser") {
+            dctx.globalCompositeOperation = "destination-out";
+            dctx.lineWidth = Number(eraserInput.value);
+          } else {
+            dctx.globalCompositeOperation = "source-over";
+            dctx.strokeStyle = currentColor;
+            dctx.lineWidth = Number(brushInput.value);
+          }
+          dctx.beginPath();
+          dctx.moveTo(previousPoint.x, previousPoint.y);
+          dctx.lineTo(point.x, point.y);
+          dctx.stroke();
+          dctx.restore();
+          previousPoint = point;
+        }
+
+        function clearCanvas(saveUndo = true) {
+          if (saveUndo) pushHistory();
+          dctx.clearRect(0, 0, drawing.width, drawing.height);
+          previousPoint = null;
+          shapeStart = null;
+          shapeLast = null;
+        }
+
+        function drawOverlay(results, fingers) {
+          ctx.fillStyle = "rgba(17, 24, 39, 0.88)";
+          ctx.fillRect(0, 0, output.width, 82);
+          ctx.fillStyle = "#ffffff";
+          ctx.font = "bold 24px Arial";
+          ctx.fillText("AI Hand Gesture Drawing Board", 18, 32);
+          ctx.font = "15px Arial";
+          ctx.fillText(`Tool: ${toolInput.value} | Color: ${colors[currentColorIndex].name} | Brush: ${brushInput.value} | Eraser: ${eraserInput.value} | Fingers: ${fingers}`, 18, 60);
+
+          if (results.multiHandLandmarks && results.multiHandLandmarks.length) {
+            const landmarks = results.multiHandLandmarks[0].map(p => ({ x: 1 - p.x, y: p.y, z: p.z }));
+            window.drawConnectors(ctx, landmarks, window.HAND_CONNECTIONS, { color: "#22c55e", lineWidth: 2 });
+            window.drawLandmarks(ctx, landmarks, { color: "#ef4444", lineWidth: 1, radius: 3 });
+          }
+        }
+
+        function onResults(results) {
+          const width = video.videoWidth || 960;
+          const height = video.videoHeight || 540;
+          resizeCanvases(width, height);
+
+          ctx.save();
+          ctx.clearRect(0, 0, output.width, output.height);
+          ctx.scale(-1, 1);
+          ctx.drawImage(results.image, -output.width, 0, output.width, output.height);
+          ctx.restore();
+
+          let fingers = 0;
+          if (results.multiHandLandmarks && results.multiHandLandmarks.length) {
+            const landmarks = results.multiHandLandmarks[0];
+            const handedness = results.multiHandedness?.[0]?.label || "Right";
+            fingers = countFingers(landmarks, handedness);
+            const point = pointFromLandmark(landmarks[8]);
+            const tool = toolInput.value;
+
+            if (colorCooldown > 0) colorCooldown--;
+            if (clearCooldown > 0) clearCooldown--;
+
+            if (fingers === 1) {
+              if (["Line", "Rectangle", "Circle"].includes(tool)) {
+                if (!shapeStart) {
+                  pushHistory();
+                  shapeStart = point;
+                }
+                shapeLast = point;
+              } else {
+                drawFreehand(point, tool);
+              }
+            } else if (fingers === 2) {
+              previousPoint = null;
+              if (shapeStart && shapeLast && ["Line", "Rectangle", "Circle"].includes(tool)) {
+                drawShape(dctx, tool, shapeStart, shapeLast);
+              }
+              shapeStart = null;
+              shapeLast = null;
+            } else if (fingers === 3 && colorCooldown === 0) {
+              currentColorIndex = (currentColorIndex + 1) % colors.length;
+              currentColor = colors[currentColorIndex].value;
+              buildSwatches();
+              colorCooldown = 18;
+              previousPoint = null;
+            } else if (fingers === 4 && clearCooldown === 0) {
+              clearCanvas(true);
+              clearCooldown = 24;
+            } else if (fingers === 5) {
+              toolInput.value = "Eraser";
+              drawFreehand(point, "Eraser");
+            } else {
+              previousPoint = null;
+            }
+          } else {
+            previousPoint = null;
+            if (shapeStart && shapeLast && ["Line", "Rectangle", "Circle"].includes(toolInput.value)) {
+              drawShape(dctx, toolInput.value, shapeStart, shapeLast);
+            }
+            shapeStart = null;
+            shapeLast = null;
+          }
+
+          ctx.drawImage(drawing, 0, 0);
+          if (shapeStart && shapeLast) drawShape(ctx, toolInput.value, shapeStart, shapeLast, true);
+          drawOverlay(results, fingers);
+          fingerStatus.textContent = `Fingers: ${fingers}`;
+        }
+
+        const hands = new Hands({
+          locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+        });
+
+        hands.setOptions({
+          maxNumHands: 1,
+          modelComplexity: 1,
+          minDetectionConfidence: 0.72,
+          minTrackingConfidence: 0.72
+        });
+        hands.onResults(onResults);
+
+        startBtn.onclick = async () => {
+          try {
+            camera = new Camera(video, {
+              onFrame: async () => {
+                await hands.send({ image: video });
+              },
+              width: 960,
+              height: 540
+            });
+            await camera.start();
+            setStatus("Camera running. Show your hand clearly.");
+          } catch (error) {
+            setStatus(`Camera error: ${error.message}`);
+          }
+        };
+
+        stopBtn.onclick = () => {
+          if (camera) {
+            camera.stop();
+            camera = null;
+          }
+          setStatus("Camera stopped.");
+        };
+
+        clearBtn.onclick = () => clearCanvas(true);
+        undoBtn.onclick = undo;
+        saveBtn.onclick = () => {
+          const link = document.createElement("a");
+          link.download = `hand_gesture_drawing_${new Date().toISOString().replace(/[:.]/g, "-")}.png`;
+          link.href = output.toDataURL("image/png");
+          link.click();
+        };
+
+        brushInput.oninput = () => brushValue.textContent = brushInput.value;
+        eraserInput.oninput = () => eraserValue.textContent = eraserInput.value;
+        buildSwatches();
+      </script>
+    </body>
+    </html>
+    """,
+    height=900,
+    scrolling=False,
+)

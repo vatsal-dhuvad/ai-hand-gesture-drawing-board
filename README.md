@@ -1,18 +1,17 @@
 # AI Hand Gesture Drawing Board
 
-Draw in the air using your hand and browser camera. This project uses Streamlit for the UI, WebRTC for live camera streaming, MediaPipe for hand landmark detection, and OpenCV for drawing.
+Draw in the air using your hand and browser camera. This deploy-friendly version uses Streamlit for the page and MediaPipe Hands JavaScript in the browser for live hand tracking and drawing.
 
 ## Features
 
 - Live browser camera inside Streamlit
-- Hand landmark detection using MediaPipe
+- Hand landmark detection using MediaPipe Hands JavaScript
 - Air drawing with index finger
 - Pencil, eraser, line, rectangle, and circle tools
 - Color picker with six colors
 - Adjustable pencil and eraser size
 - Gesture-based clear, erase, and color change
-- Save current camera frame with drawing
-- Saved drawing gallery
+- Download drawing result as PNG
 - Separate local OpenCV script included for laptop-only demos
 
 ## Gesture Controls
@@ -39,7 +38,6 @@ Upload these files to GitHub:
 - `app.py`
 - `gesture_air_canvas.py`
 - `requirements.txt`
-- `packages.txt`
 - `runtime.txt`
 - `.gitignore`
 - `LICENSE`
@@ -48,11 +46,11 @@ Upload these files to GitHub:
 Deploy on Streamlit Community Cloud with:
 
 - Main file path: `app.py`
-- Python version: choose `3.11` from Advanced settings
+- Any supported Python version
 
 Camera access works on localhost or HTTPS deployed links.
 
-If your existing Streamlit app already deployed with Python 3.14, delete that app from Streamlit Cloud and deploy it again. Streamlit does not reliably change the Python version for an existing deployed app from a repo file.
+This deploy version only needs `streamlit` in `requirements.txt`. Camera and hand detection run in the browser through JavaScript, so Streamlit Cloud does not need to install OpenCV, MediaPipe, AV, or WebRTC Python packages.
 
 ## Local OpenCV Window Version
 
